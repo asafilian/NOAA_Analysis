@@ -1,0 +1,474 @@
+---
+title: 'The U.S. NOAA Storm Data: Analysis of Most Harmful and Costly Damages^[This analysis report is the final project of the Producible Research (Coursera) course at Johns Hopkins University]'
+author: 
+        name: "Aliakbar Safilian"
+        email: a.a.safilian@gmail.com  
+date: "October 27, 2018"
+output:
+  html_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## Synopsis
+In this article, we explore the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database, which represents characteristics of major weather events in the US. The charateristics include when and where the events occur and estimates of any health damage (i.e., fatalities and injuries) and economic damages (i.e., property and crop damages).
+
+The research questions we have addressed in this analysis are as follows: 
+
+1. Across the United States, which types of events are most harmful with respect to population health? 
+2. Across the United States, which types of events have the greatest economic consequences? 
+
+The structure of this report is as follows: In Section [Data Processing](#data_processing) we load and pre-process the data. Section [Results](#results) presents our analysis results. 
+ 
+
+## Data Processing {#data_processing}
+In this section, we load and process the data. In the first subsection ([Data](#load)), we load the data. The [Variables](#variables) subsection selects the variables from the data set that are essential for our analysis. The subsequent [subsection](#real-damage) calculates the real amount of property and crop damages. Finally, in the last [subsection](#categories), we categorize the damages into two groups (health and economic).     
+
+### Data {#load}
+The data for this project comes in the form of a CSV file compressed via the bzip2 algorithm to reduce its size. The following script loads it into a variable named **data**.  
+
+```{r load-data, cache = TRUE}
+dataURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+temp <- tempfile()
+download.file(dataURL,temp)
+data <- read.csv(temp, stringsAsFactors = FALSE)
+unlink(temp)
+dim(data)
+```
+
+As we see, the data has **`r dim(data)[1]`** observations and **`r dim(data)[2]`** variables. 
+
+### Variables {#variables}
+Now, let us take a look at the variable names. (Note that we first convert them to lower case.) 
+
+```{r names-original}
+names(data) <- tolower(names(data))
+names(data)
+```
+
+The variables that we need in this analysis are as follows: 
+
+- **`r names(data)[8]`** (the type of the event) 
+- **`r names(data)[23]`** (the number of fatalities of the event)
+- **`r names(data)[24]`** (the number of injuries of the event)
+- **`r names(data)[25]`** (a value for property damage caused by the event)
+- **`r names(data)[26]`** (the exponent of property damage)
+- **`r names(data)[27]`** (a value for crop damage caused by the event)
+- **`r names(data)[28]`** (exponent of crop damage) 
+
+To make our life easier, we modify the names of the above varaibles as follows:
+
+```{r}
+names(data)[8] <- "event_type"
+names(data)[25] <- "property_damage"
+names(data)[26] <- "property_dmg_exp"
+names(data)[27] <- "crop_damage"
+names(data)[28] <- "crop_dmg_exp"
+```
+
+In the following script, we keep only those variables of the data set that we need for our analysis.  
+
+```{r}
+library(dplyr)
+data <- data %>% 
+        select(event_type, fatalities, injuries, property_damage, property_dmg_exp, crop_damage, crop_dmg_exp)
+str(data)
+```
+
+
+### Real Amount of Economic Damages {#real-damage}
+The next step is to calculate the *real* amount of economic damages, i.e., property and crop damages. The combination of **`r names(data)[5]`** (**`r names(data)[7]`**, respectively) and **`r names(data)[4]`** (**`r names(data)[6]`**, respectively) gives us the amount of property (crop, respectively) damage in US dollars. Indeed, **`r names(data)[5]`** and **`r names(data)[7]`** are kind of exponents for the values in **`r names(data)[4]`** and **`r names(data)[6]`**, respectively. Let us first take a look at the possible values of these exponents: 
+
+```{r}
+
+unique(c(unique(data$property_dmg_exp), unique(data$crop_dmg_exp))) 
+```
+
+According to [this article](https://rstudio-pubs-static.s3.amazonaws.com/58957_37b6723ee52b455990e149edde45e5b6.html), the meaning of the possible values of **`r names(data)[5]`** and **`r names(data)[7]`** are as follows: 
+
+- H,h = hundreds = 100 
+- K,k = kilos = thousands = 1,000 
+- M,m = millions = 1,000,000 
+- B,b = billions = 1,000,000,000 
+- (+) = 1 
+- (-) = 0 
+- (?) = 0 
+- black/empty character = 0 
+- numeric 0..8 = 10 
+
+The following function, **apply_exp**, helps us to compute the real amount of damages in US dollars. It takes a *value* (i.e., a value of either **`r names(data)[4]`** or **`r names(data)[6]`**) and converts it to a new value based on a given *exponent*:  
+
+```{r}
+apply_exp <- function(value, exponent){
+        x <- 0
+        if((exponent == "h") || (exponent == "H")){
+               x <- value * 100  
+       }
+        else if((exponent == "k") || (exponent == "K")){
+                x <- value * 1000
+        }
+        else if((exponent == "m") || (exponent == "M")){
+                x <- value * 1000000
+        }
+        else if((exponent == "b") || (exponent == "B")){
+                x <- value * 1000000000
+        }
+        else if(exponent == "+"){
+                x <- value
+        }
+        else if(exponent %in% as.character(0:8)){
+                x <- value * 10
+        }
+        else {
+                x <- 0
+        }
+        x
+}
+```
+
+The following script adds the following new variables to the data set: 
+
+- **prop_dmg**, which represents the real amount of *property* damage casused by events in US dollars
+
+- **crop_dmg**, which represents the real amount of *crop* damage casused by events in US dollars
+
+Moreover, it removes the old variables (i.e, **property_damage**, **crop_damage**, **property_dmg_exp**, and **crop_dmg_exp**), as we do not need to keep them in the data set anymore.
+
+```{r}
+data <- data %>% 
+        mutate(prop_dmg = mapply(apply_exp, property_damage, property_dmg_exp), crop_dmg = mapply(apply_exp, crop_damage, crop_dmg_exp)) %>% 
+        select(-c(property_damage, crop_damage, property_dmg_exp, crop_dmg_exp))
+
+sample_n(data, 6)
+```
+
+### Health and Economic Damages {#categories}
+For a given observation, we can categorize the damages into two major groups: the *health* and the *economic* damages. The former would be the number of *fatalities* plus the number of *injuries*. The latter would be the amount of *crop damage* plus the amount of *property damage*. In the following script, we add two corresponding variables (**health_dmg** and **economic_dmg**, respectivly) to the data set.
+
+```{r}
+data <- data %>% 
+        mutate(health_dmg = fatalities + injuries, economic_dmg = prop_dmg + crop_dmg)
+data <- data[, c(1:3, 6, 4, 5, 7)]
+sample_n(data, 5)
+```
+
+Now, let us split our data into two data sets: **data_health** and **data_economic**: 
+
+```{r}
+data_health <- data[, c(1:4)]
+str(data_health)
+
+data_economic <- data[, c(1, 5:7)]
+str(data_economic)
+```
+
+Now, we are ready to address our analysis questions in the next section. 
+
+## Results {#results}
+In this section, we address our main questions:
+
+**QUESTION 1**:  ``Across the United States, which types of events are most harmful with respect to population health?''
+
+**QUESTION 2**: ``Across the United States, which types of events have the greatest economic consequences?''
+
+To address the above questions, we will respectively play with the data sets **data_health** and **data_economic**. We address the above questions in the following subsections, respectively. 
+
+### Most Dangerous Event Types {#danger-analysis}
+In the following script, we get the *sum* of health damages for each *event type*. The result is saved into a new data set named **data_health_evn**.  
+
+<a id="chunk1"></a>
+```{r}
+data_health_evn <- data_health %>% 
+        group_by(event_type) %>% 
+        summarize(fatalities = sum(fatalities, na.rm = TRUE), injuries = sum(injuries, na.rm = TRUE), health_damage = sum(health_dmg, na.rm = TRUE))
+
+data_health_evn <- as.data.frame(data_health_evn)
+tail(data_health_evn)
+```
+
+
+Let us take a look at the range of health damages:  
+
+```{r}
+range(data_health_evn$health_damage)
+```
+
+The following script shows us what percentage of health damage values are 0 in this vector.
+
+```{r}
+mean(data_health_evn$health_damage == 0) * 100
+```
+
+Since those events with 0 health damage are not of interest, we filter out them from the data set: 
+
+```{r}
+data_health_evn <- data_health_evn %>% filter(health_damage != 0)
+dim(data_health_evn)
+```
+
+Let us now take a look at the quantile of the health damage vector:
+
+```{r}
+bord_health <- quantile(data_health_evn$health_damage, probs = c(0.1, 0.5, 0.9))
+bord_health
+```
+
+In our point of view, those events that are in top %10 of decreaseing health damages should be considered as the most harmful damages with respect to population health. As we see above, any event type whose health damage is greater than or equal to `r round(bord_health[3])`^[Note that we rounded the actual value, as only integer values would make sense for health damages.] should be included in this list. In the rest of this subsection, we analyze more these event types. 
+
+We filter our data set, according to the above criteria, to get a new data frame, **data_health_evn_worst**. Let us refer to this data set as the *worst cases w.r.t health damages*. 
+
+```{r}
+data_health_evn_worst <- data_health_evn %>% filter(health_damage >= round(bord_health[3]))
+dim(data_health_evn_worst)
+```
+
+Before going further (say visual analysis), we need to add IDs for events. As we see in [this code chunk](#chunk1), the names of some given events are so long. This could make our analysis plots look akward. Therefore, we add an index column to our data set to distiguish the event types by their indices. 
+
+```{r}
+data_health_evn_worst$event_ID <- seq.int(nrow(data_health_evn_worst))
+data_health_evn_worst <- data_health_evn_worst[, c(5, 1:4)]
+str(data_health_evn_worst)
+```
+
+In the following, we do some visualiztion analysis on our data set, i.e., the worst cases w.r.t health damages. The <span style="color:blue">blue</span> and <span style="color:red">red</span> dashed lines indicate the corresponding *median* and *mean* lines. The x-axis in any of the following plots denotes the event IDs. <!--See [Apendix]{#app} for the description of event IDs.--> 
+
+
+
+```{r}
+layout(matrix(c(1, 2, 3, 3), nrow=2, byrow=TRUE))
+
+with(data_health_evn_worst, plot(event_ID, fatalities, main = "Fatalities in Worst Cases", xlab = "Event ID", ylab =  "Fatalities"))
+abline(h = median(data_health_evn_worst$fatalities), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_health_evn_worst$fatalities), col = "red", lwd = 2, lty = 3)
+
+with(data_health_evn_worst, plot(event_ID, injuries, main = "Injuries in Worst Cases", xlab = "Event ID", ylab = "Injuries"))
+abline(h = median(data_health_evn_worst$injuries), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_health_evn_worst$injuries), col = "red", lwd = 2, lty = 3)
+
+with(data_health_evn_worst, plot(event_ID, health_damage, main = "Health Damages in Worst Cases", xlab = "Event ID", ylab =  "fatalities + injuries"))
+abline(h = median(data_health_evn_worst$health_damage), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_health_evn_worst$health_damage), col = "red", lwd = 2, lty = 3)
+```
+
+Here is just to recall which **Event IDs** in our plots refer to what **Event Types**:
+```{r}
+data_health_evn_worst %>% select(event_ID, event_type) 
+```
+
+The *median* (blue line), *mean* (red line), and *max* of the  **fatalities** in the worst cases are **`r median(data_health_evn_worst$fatalities)`**, ~**`r round(mean(data_health_evn_worst$fatalities))`**, and **`r max(data_health_evn_worst$fatalities)`**, respectively. 
+
+The following script extracts those events which have fatalities above the median value of the selected events:
+
+```{r}
+data_fatalities_median <- data_health_evn_worst %>% filter(data_health_evn_worst$fatalities > median(data_health_evn_worst$fatalities))
+data_fatalities_median$event_type
+```
+
+The following script, extracts those selected events which are above mean value:
+
+```{r}
+data_fatalities_mean <- data_health_evn_worst %>% filter(data_health_evn_worst$fatalities > mean(data_health_evn_worst$fatalities))
+data_fatalities_mean$event_type
+```
+
+The following script extracts the most harmful event type with respect to the number of fatalities.
+
+```{r}
+data_health_evn_worst[data_health_evn_worst$fatalities == max(data_health_evn_worst$fatalities), ]$event_type
+```
+
+The *median*, *mean*, and *max* of the  **injuries** in the selected event types are ~**`r round(median(data_health_evn_worst$injuries))`**, ~**`r round(mean(data_health_evn_worst$injuries))`**, **`r options("scipen"=100, "digits"=4); max(data_health_evn_worst$injuries)`**, respectively. 
+
+The following script extracts those events which have injuries above the median value of the selected events:
+
+```{r}
+data_injuries_median <- data_health_evn_worst %>% filter(data_health_evn_worst$injuries > median(data_health_evn_worst$injuries))
+data_injuries_median$event_type
+```
+
+The following script extracts those events which have injuries above the mean value of the selected events:
+
+```{r}
+data_injuries_mean <- data_health_evn_worst %>% filter(data_health_evn_worst$injuries > mean(data_health_evn_worst$injuries))
+data_injuries_mean$event_type
+```
+
+The following script extracts the most harmful event type with respect to the number of injuries.
+
+```{r}
+data_health_evn_worst[data_health_evn_worst$injuries == max(data_health_evn_worst$injuries), ]$event_type
+```
+
+The *median*, *mean*, and *max* of the  **health damages** (fatalities + injuries) in the worst case event types are **`r round(median(data_health_evn_worst$health_damage))`**, **`r mean(data_health_evn_worst$health_damage)`**, **`r max(data_health_evn_worst$health_damage)`**, respectively. 
+
+The following script, extracts those events which have health damages above the median value of the selected events:
+
+```{r}
+data_health_median <- data_health_evn_worst %>% filter(data_health_evn_worst$health_damage > median(data_health_evn_worst$health_damage))
+data_health_median$event_type
+```
+
+The following script, extracts those events which have health damages above the mean value of the selected events:
+
+```{r}
+data_health_mean <- data_health_evn_worst %>% filter(data_health_evn_worst$health_damage > mean(data_health_evn_worst$health_damage))
+data_health_mean$event_type
+```
+
+The following script extracts the most harmful event type with respect to the number of injuries plus fatalities.
+
+```{r}
+data_health_evn_worst[data_health_evn_worst$health_damage == max(data_health_evn_worst$health_damage), ]$event_type
+```
+
+
+
+
+
+### Most Costly Event Types {#cost-analysis}
+In the following script, we get the *sum* of economic damages for each *event type*. The result is saved into a new data set named **data_economic_evn**.  
+
+
+```{r}
+data_economic_evn <- data_economic %>% 
+        group_by(event_type) %>% 
+        summarize(property_damage = sum(prop_dmg, na.rm = TRUE), crop_damage = sum(crop_dmg, na.rm = TRUE), economic_damage = sum(economic_dmg, na.rm = TRUE))
+
+data_economic_evn <- as.data.frame(data_economic_evn)
+tail(data_economic_evn)
+```
+
+
+The following script represents the range of economic damages in US dollars.  
+
+```{r}
+range(data_economic_evn$economic_damage)
+```
+
+The following script shows us what percentage of economic damage values are 0 in this vector.
+
+```{r}
+mean(data_economic_evn$economic_damage == 0) * 100
+```
+
+Obviously, we are not interested in event types whose economic damages are 0. Therefore, we filter them out from our data set:
+
+```{r}
+data_economic_evn <- data_economic_evn %>% filter(economic_damage != 0)
+dim(data_economic_evn)
+```
+
+Let us now take a look at the quantile of the economic damage vector:
+
+```{r}
+bord_economic <- quantile(data_economic_evn$economic_damage, probs = c(0.1, 0.5, 0.9) )
+bord_economic
+```
+
+Again, we consider those event types whose economic damages are in top %10 of decreaseing economic damages. As we see above, any event type whose economic damage is greater than or equal to **`r options("scipen"=100, "digits"=4); round(bord_economic[3])`** should be included in this list. 
+
+We filter our data set, according to the above criteria, to get a new data frames, called **data_economic_evn_worst**. Let us refer to this data set as the *worst cases w.r.t economic damages*.
+
+```{r}
+data_economic_evn_worst <- data_economic_evn %>% filter(economic_damage >= round(bord_economic[3]))
+dim(data_economic_evn_worst)
+```
+
+As we did in the previous [subsection]{#health-analysis}, we add an index column to **data_economic_evn** to distiguish the event types by their indices. 
+
+```{r}
+data_economic_evn_worst$event_ID <- seq.int(nrow(data_economic_evn_worst))
+data_economic_evn_worst <- data_economic_evn_worst[, c(5, 1:4)]
+str(data_economic_evn_worst)
+```
+
+In the following figures, we see the plots regarding the worst cases w.r.t. economic damages. Again, the <span style="color:blue">blue</span> and <span style="color:red">red</span> dashed lines indicate the corresponding *median* and *mean* lines, respectively. 
+
+```{r}
+layout(matrix(c(1, 2, 3, 3), nrow=2, byrow=TRUE))
+
+with(data_economic_evn_worst, plot(event_ID, property_damage, main = "Property Damages in Worst Cases", xlab = "Event ID", ylab =  "Property Damages ($)"))
+abline(h = median(data_economic_evn_worst$property_damage), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_economic_evn_worst$property_damage), col = "red", lwd = 2, lty = 3)
+
+with(data_economic_evn_worst, plot(event_ID, crop_damage, main = "Crop Damages in Worst Cases", xlab = "Event ID", ylab =  "Crop Damages ($)"))
+abline(h = median(data_economic_evn_worst$crop_damage), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_economic_evn_worst$crop_damage), col = "red", lwd = 2, lty = 3)
+
+with(data_economic_evn_worst, plot(event_ID, economic_damage, main = "Economic (Property + Crop) Damages in Worst Cases", xlab = "Event ID", ylab =  "Economic Damages ($)"))
+abline(h = median(data_economic_evn_worst$economic_damage), col = "blue", lwd = 2, lty = 3)
+abline(h = mean(data_economic_evn_worst$economic_damage), col = "red", lwd = 2, lty = 3)
+```
+
+Here is to recall what **Event IDs** in our plots refer to what **Event Types**:
+
+```{r}
+data_economic_evn_worst %>% select(event_ID, event_type)
+```
+
+The *median* (blue line), *mean* (red line), and *max* of the  **property damges** in the selected event types are **`r median(data_economic_evn_worst$property_damage)`**\$, ~**`r round(mean(data_economic_evn_worst$property_damage))`**\$, and **`r max(data_economic_evn_worst$property_damage)`**\$ respectively. 
+
+The following script extracts those events whose property damage are above the median value of the selected events:
+
+```{r}
+data_property_median <- data_economic_evn_worst %>% filter(data_economic_evn_worst$property_damage > median(data_economic_evn_worst$property_damage))
+data_property_median$event_type
+```
+
+The following script extracts those events whose property damage are above the mean value of the selected events:
+
+```{r}
+data_property_mean <- data_economic_evn_worst %>% filter(data_economic_evn_worst$property_damage > mean(data_economic_evn_worst$property_damage))
+data_property_mean$event_type
+```
+
+The following script extracts the most constly event type with respect to property damage.
+
+```{r}
+data_economic_evn_worst[data_economic_evn_worst$property_damage == max(data_economic_evn_worst$property_damage), ]$event_type
+```
+
+The *median*  and *mean*, and *max* of the  **crop damage** in the selected event types are ~**`r round(median(data_economic_evn_worst$crop_damage))`**\$, ~**`r round(mean(data_economic_evn_worst$crop_damage))`**\$, **`r max(data_economic_evn_worst$crop_damage)`**\$, respectively. 
+
+The following script extracts those events whose crop damage are above the median value of the selected events:
+
+```{r}
+data_crop_median <- data_economic_evn_worst %>% filter(data_economic_evn_worst$crop_damage > median(data_economic_evn_worst$crop_damage))
+data_crop_median$event_type
+```
+
+The following script extracts those events whose crop damage are above the mean value of the selected events:
+
+```{r}
+data_crop_mean <- data_economic_evn_worst %>% filter(data_economic_evn_worst$crop_damage > mean(data_economic_evn_worst$crop_damage))
+data_crop_mean$event_type
+```
+
+The following script extracts the most costly event type with respect to the crop damage.
+
+```{r}
+data_economic_evn_worst[data_economic_evn_worst$crop_damage == max(data_economic_evn_worst$crop_damage), ]$event_type
+```
+
+The *median*  and *mean*, and *max* of the  **economic damages** (property + crop damages) in the selected event types are **`r median(data_economic_evn_worst$economic_damage)`**\$, **`r mean(data_economic_evn_worst$economic_damage)`**\$, **`r max(data_economic_evn_worst$economic_damage)`**\$, respectively.  
+
+The following script extracts those events whose economic cost are above the median value of the selected events:
+
+```{r}
+data_eco_median <- data_economic_evn_worst %>% filter(data_economic_evn_worst$economic_damage > median(data_economic_evn_worst$economic_damage))
+data_eco_median$event_type
+```
+
+The following script extracts those events whose economic cost are above the mean value of the selected events:
+
+```{r}
+data_eco_mean <- data_economic_evn_worst %>% filter(data_economic_evn_worst$economic_damage > mean(data_economic_evn_worst$economic_damage))
+data_eco_mean$event_type
+```
+
+The following script extracts the most costly event type.
+
+```{r}
+data_economic_evn_worst[data_economic_evn_worst$economic_damage == max(data_economic_evn_worst$economic_damage), ]$event_type
+```
