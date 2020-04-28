@@ -1,5 +1,5 @@
 # The U.S. NOAA Storm Data: Analysis of Most Harmful and Costly Damages
-![har](img/storm3.JPG)
+![har](img/storm3.jpg)
 
 
 In this project, I explored the U.S. National Oceanic and Atmospheric Administration’s (NOAA) storm database, which represents characteristics of major weather events in the US. The charateristics include when and where the events occur and estimates of any health damage (i.e., fatalities and injuries) and economic damages (i.e., property and crop damages).
